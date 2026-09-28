@@ -1,4 +1,4 @@
-import EncryptedStorage from 'react-native-encrypted-storage';
+import * as SecureStore from 'expo-secure-store';
 
 // Storage keys
 const KEYS = {
@@ -27,7 +27,7 @@ export const getDateKey = (date = new Date()) => {
 // --- Profile ---
 export const saveProfile = async (profile) => {
   try {
-    await EncryptedStorage.setItem(KEYS.PROFILE, JSON.stringify(profile));
+    await SecureStore.setItemAsync(KEYS.PROFILE, JSON.stringify(profile));
     return true;
   } catch (e) {
     console.error('Failed to save profile:', e);
@@ -37,7 +37,7 @@ export const saveProfile = async (profile) => {
 
 export const loadProfile = async () => {
   try {
-    const data = await EncryptedStorage.getItem(KEYS.PROFILE);
+    const data = await SecureStore.getItemAsync(KEYS.PROFILE);
     return data ? JSON.parse(data) : null;
   } catch (e) {
     console.error('Failed to load profile:', e);
@@ -47,7 +47,7 @@ export const loadProfile = async () => {
 
 export const clearProfile = async () => {
   try {
-    await EncryptedStorage.removeItem(KEYS.PROFILE);
+    await SecureStore.deleteItemAsync(KEYS.PROFILE);
     return true;
   } catch (e) {
     console.error('Failed to clear profile:', e);
@@ -73,7 +73,7 @@ export const saveDailyLog = async (dateKey, log) => {
   try {
     const allLogs = await loadAllDailyLogs();
     allLogs[dateKey] = { ...allLogs[dateKey], ...log, date: dateKey };
-    await EncryptedStorage.setItem(KEYS.DAILY_LOGS, JSON.stringify(allLogs));
+    await SecureStore.setItemAsync(KEYS.DAILY_LOGS, JSON.stringify(allLogs));
     return true;
   } catch (e) {
     console.error('Failed to save daily log:', e);
@@ -93,7 +93,7 @@ export const loadDailyLog = async (dateKey) => {
 
 export const loadAllDailyLogs = async () => {
   try {
-    const data = await EncryptedStorage.getItem(KEYS.DAILY_LOGS);
+    const data = await SecureStore.getItemAsync(KEYS.DAILY_LOGS);
     return data ? JSON.parse(data) : {};
   } catch (e) {
     console.error('Failed to load all daily logs:', e);
@@ -103,7 +103,7 @@ export const loadAllDailyLogs = async () => {
 
 export const clearAllDailyLogs = async () => {
   try {
-    await EncryptedStorage.removeItem(KEYS.DAILY_LOGS);
+    await SecureStore.deleteItemAsync(KEYS.DAILY_LOGS);
     return true;
   } catch (e) {
     console.error('Failed to clear daily logs:', e);
@@ -114,7 +114,7 @@ export const clearAllDailyLogs = async () => {
 // --- Settings ---
 export const saveSettings = async (settings) => {
   try {
-    await EncryptedStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
+    await SecureStore.setItemAsync(KEYS.SETTINGS, JSON.stringify(settings));
     return true;
   } catch (e) {
     console.error('Failed to save settings:', e);
@@ -124,7 +124,7 @@ export const saveSettings = async (settings) => {
 
 export const loadSettings = async () => {
   try {
-    const data = await EncryptedStorage.getItem(KEYS.SETTINGS);
+    const data = await SecureStore.getItemAsync(KEYS.SETTINGS);
     return data ? JSON.parse(data) : { units: 'metric' }; // default metric
   } catch (e) {
     console.error('Failed to load settings:', e);

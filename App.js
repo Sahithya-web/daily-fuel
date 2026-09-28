@@ -16,7 +16,40 @@ import Ring from "./Ring";
 import TabBar from "./TabBar";
 import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
+import * as BarCodeScanner from "expo-barcode-scanner";
 import storage from "./storage";
+
+// Meal types
+const MEALS = [
+  { key: "breakfast", label: "Breakfast", icon: "🌅", color: "#E8A23D" },
+  { key: "lunch", label: "Lunch", icon: "☀️", color: "#4FB0A5" },
+  { key: "dinner", label: "Dinner", icon: "🌙", color: "#7C5CD8" },
+  { key: "snacks", label: "Snacks", icon: "🍪", color: "#E2665A" },
+];
+
+// Common food database (local fallback)
+const FOOD_DATABASE = [
+  { name: "Chicken Breast (100g)", calories: 165, protein: 31, carbs: 0, fat: 3.6, serving: "100g" },
+  { name: "Salmon (100g)", calories: 208, protein: 20, carbs: 0, fat: 13, serving: "100g" },
+  { name: "Egg (large)", calories: 78, protein: 6, carbs: 0.6, fat: 5, serving: "1 egg" },
+  { name: "Greek Yogurt (170g)", calories: 100, protein: 17, carbs: 6, fat: 0, serving: "1 cup" },
+  { name: "White Rice (cooked, 100g)", calories: 130, protein: 2.7, carbs: 28, fat: 0.3, serving: "100g" },
+  { name: "Brown Rice (cooked, 100g)", calories: 111, protein: 2.6, carbs: 23, fat: 0.9, serving: "100g" },
+  { name: "Sweet Potato (100g)", calories: 86, protein: 1.6, carbs: 20, fat: 0.1, serving: "100g" },
+  { name: "Oats (dry, 50g)", calories: 190, protein: 7, carbs: 32, fat: 3.5, serving: "50g" },
+  { name: "Banana (medium)", calories: 105, protein: 1.3, carbs: 27, fat: 0.4, serving: "1 medium" },
+  { name: "Apple (medium)", calories: 95, protein: 0.5, carbs: 25, fat: 0.3, serving: "1 medium" },
+  { name: "Broccoli (100g)", calories: 34, protein: 2.8, carbs: 7, fat: 0.4, serving: "100g" },
+  { name: "Spinach (100g)", calories: 23, protein: 2.9, carbs: 3.6, fat: 0.4, serving: "100g" },
+  { name: "Avocado (half)", calories: 160, protein: 2, carbs: 8.5, fat: 15, serving: "1/2 avocado" },
+  { name: "Almonds (28g)", calories: 164, protein: 6, carbs: 6, fat: 14, serving: "28g (1 oz)" },
+  { name: "Peanut Butter (1 tbsp)", calories: 94, protein: 4, carbs: 3, fat: 8, serving: "1 tbsp" },
+  { name: "Olive Oil (1 tbsp)", calories: 119, protein: 0, carbs: 0, fat: 14, serving: "1 tbsp" },
+  { name: "Whole Milk (240ml)", calories: 149, protein: 8, carbs: 12, fat: 8, serving: "1 cup" },
+  { name: "Whey Protein (1 scoop)", calories: 120, protein: 24, carbs: 3, fat: 1, serving: "1 scoop" },
+  { name: "Ground Beef 90% (100g)", calories: 250, protein: 26, carbs: 0, fat: 15, serving: "100g" },
+  { name: "Tofu (100g)", calories: 76, protein: 8, carbs: 1.9, fat: 4.8, serving: "100g" },
+];
 
 // ---------- option data ----------
 const SEX_OPTIONS = [
@@ -79,24 +112,40 @@ export default function App() {
   });
   const [result, setResult] = useState(null);
   const [screen, setScreen] = useState("loading");
-  const [food, setFood] = useState([]);
-  const [foodForm, setFoodForm] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  // Food state: grouped by meal { breakfast: [], lunch: [], dinner: [], snacks: [] }
+  const [foodByMeal, setFoodByMeal] = useState({ breakfast: [], lunch: [], dinner: [], snacks: [] });
+  const [foodForm, setFoodForm] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "", meal: "breakfast", serving: "1", servingUnit: "serving" });
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
+  // Food logging UI states
+  const [activeMeal, setActiveMeal] = useState("breakfast");
+  const [showFoodSearch, setShowFoodSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const [barcodeScanned, setBarcodeScanned] = useState(false);
+  const [recentFoods, setRecentFoods] = useState([]);
+  const [favoriteFoods, setFavoriteFoods] = useState([]);
+  const [waterMl, setWaterMl] = useState(0);
+  const [waterGoal, setWaterGoal] = useState(2500); // 2.5L default
 
   // Load persisted data on startup
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [savedProfile, savedResult, todayFood] = await Promise.all([
+        const [savedProfile, savedResult, todayLog] = await Promise.all([
           storage.loadProfile(),
-          storage.loadSettings(), // result stored in settings for now
-          storage.getTodayFood(),
+          storage.loadSettings(),
+          storage.loadDailyLog(storage.getTodayKey()),
         ]);
         if (savedProfile) {
           setProfile(savedProfile);
+          // Convert imperial to metric if needed for display
+          if (savedProfile.units === "imperial" && savedProfile.heightFt) {
+            const imperial = { heightFt: savedProfile.heightFt, heightIn: savedProfile.heightIn, weightLbs: savedProfile.weightLbs };
+            // Keep imperial values for display
+          }
         }
         if (savedResult?.calorieGoal) {
           setResult({
@@ -106,11 +155,46 @@ export default function App() {
             proteinGoal: savedResult.proteinGoal,
             fatGoal: savedResult.fatGoal,
             carbGoal: savedResult.carbGoal,
+            fiberGoal: savedResult.fiberGoal,
+            paceDeficit: savedResult.paceDeficit,
           });
           setScreen("home");
         }
-        if (todayFood?.length) {
-          setFood(todayFood);
+        if (todayLog) {
+          // Load food by meal
+          if (todayLog.food) {
+            const grouped = { breakfast: [], lunch: [], dinner: [], snacks: [] };
+            todayLog.food.forEach(item => {
+              if (grouped[item.meal]) {
+                grouped[item.meal].push(item);
+              } else {
+                grouped.snacks.push(item); // fallback
+              }
+            });
+            setFoodByMeal(grouped);
+          }
+          // Load water
+          if (todayLog.waterMl) {
+            setWaterMl(todayLog.waterMl);
+          }
+        }
+        // Load recent foods (last 20 unique foods from all logs)
+        const allLogs = await storage.loadAllDailyLogs();
+        const recent = [];
+        const seen = new Set();
+        Object.values(allLogs).reverse().forEach(log => {
+          log.food?.forEach(item => {
+            const key = item.name.toLowerCase();
+            if (!seen.has(key) && recent.length < 20) {
+              seen.add(key);
+              recent.push({ ...item, meal: "breakfast" }); // default meal for quick add
+            }
+          });
+        });
+        setRecentFoods(recent);
+        // Load favorites from settings
+        if (savedResult?.favorites) {
+          setFavoriteFoods(savedResult.favorites);
         }
       } catch (e) {
         console.error('Failed to load data:', e);
@@ -742,180 +826,518 @@ export default function App() {
     );
   }
 
-  // ---------- FOOD SCREEN (placeholder) ----------
+  // ---------- FOOD SCREEN ----------
   if (screen === "food") {
 
-    const addFood = async () => {
-      if (!foodForm.name || !foodForm.calories) return;
+    // Calculate per-meal totals
+    const mealTotals = {};
+    MEALS.forEach(meal => {
+      const items = foodByMeal[meal.key] || [];
+      mealTotals[meal.key] = {
+        calories: items.reduce((sum, i) => sum + (i.calories || 0), 0),
+        protein: items.reduce((sum, i) => sum + (i.protein || 0), 0),
+        carbs: items.reduce((sum, i) => sum + (i.carbs || 0), 0),
+        fat: items.reduce((sum, i) => sum + (i.fat || 0), 0),
+      };
+    });
+    const dailyTotals = MEALS.reduce((acc, meal) => ({
+      calories: acc.calories + mealTotals[meal.key].calories,
+      protein: acc.protein + mealTotals[meal.key].protein,
+      carbs: acc.carbs + mealTotals[meal.key].carbs,
+      fat: acc.fat + mealTotals[meal.key].fat,
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
 
+    // Helper: Save food to storage
+    const saveFoodToStorage = async (updatedFoodByMeal) => {
+      const allFood = MEALS.flatMap(m => updatedFoodByMeal[m.key] || []);
+      await storage.saveDailyLog(storage.getTodayKey(), { food: allFood, waterMl });
+    };
+
+    // Add food to specific meal
+    const addFood = async (entry = null) => {
+      const data = entry || foodForm;
+      if (!data.name || !data.calories) return;
+
+      const serving = parseFloat(data.serving) || 1;
       const newEntry = {
         id: Date.now(),
-        name: foodForm.name,
-        calories: parseFloat(foodForm.calories) || 0,
-        protein: parseFloat(foodForm.protein) || 0,
-        carbs: parseFloat(foodForm.carbs) || 0,
-        fat: parseFloat(foodForm.fat) || 0,
+        name: data.name,
+        calories: Math.round((parseFloat(data.calories) || 0) * serving),
+        protein: Math.round((parseFloat(data.protein) || 0) * serving * 10) / 10,
+        carbs: Math.round((parseFloat(data.carbs) || 0) * serving * 10) / 10,
+        fat: Math.round((parseFloat(data.fat) || 0) * serving * 10) / 10,
+        meal: data.meal || activeMeal,
+        serving: data.serving || "1",
+        servingUnit: data.servingUnit || "serving",
         timestamp: Date.now(),
       };
 
-      const updatedFood = [newEntry, ...food];
-      setFood(updatedFood);
-      await storage.addFoodToToday(newEntry);
+      setFoodByMeal(prev => ({
+        ...prev,
+        [newEntry.meal]: [newEntry, ...(prev[newEntry.meal] || [])],
+      }));
 
-      setFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+      await saveFoodToStorage({
+        ...foodByMeal,
+        [newEntry.meal]: [newEntry, ...(foodByMeal[newEntry.meal] || [])],
+      });
+
+      // Update recent foods
+      setRecentFoods(prev => {
+        const filtered = prev.filter(f => f.name.toLowerCase() !== newEntry.name.toLowerCase());
+        return [newEntry, ...filtered].slice(0, 20);
+      });
+
+      if (!entry) {
+        setFoodForm({ name: "", calories: "", protein: "", carbs: "", fat: "", meal: activeMeal, serving: "1", servingUnit: "serving" });
+      }
+      setShowFoodSearch(false);
     };
 
-  const scanPlate = async () => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      alert("Camera permission is needed to scan food.");
-      return;
-    }
+    // Quick add from recent/favorites/database
+    const quickAddFood = (foodItem) => {
+      addFood({
+        name: foodItem.name,
+        calories: foodItem.calories,
+        protein: foodItem.protein,
+        carbs: foodItem.carbs,
+        fat: foodItem.fat,
+        meal: activeMeal,
+        serving: "1",
+        servingUnit: foodItem.serving || "serving",
+      });
+    };
 
-    const result = await ImagePicker.launchCameraAsync({
-      base64: true,
-      quality: 0.5,
-    });
+    // Toggle favorite
+    const toggleFavorite = (foodItem) => {
+      setFavoriteFoods(prev => {
+        const isFav = prev.some(f => f.name === foodItem.name);
+        if (isFav) {
+          return prev.filter(f => f.name !== foodItem.name);
+        } else {
+          const updated = [foodItem, ...prev].slice(0, 50);
+          // Persist favorites
+          storage.saveSettings({ ...result, favorites: updated, units: profile.units, onboardingComplete: true });
+          return updated;
+        }
+      });
+    };
 
-    if (result.canceled) return;
+    const isFavorite = (name) => favoriteFoods.some(f => f.name === name);
 
-    setScanning(true)
-try{
-   const photoBase64 = result.assets[0].base64;
-const response = await fetch(
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${process.env.EXPO_PUBLIC_EXPLABS_API_KEY}`,
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: "Estimate the calories, protein, carbs, and fat for the food in this image. Respond ONLY with JSON in this exact shape, no other text: {\"name\": \"short food description\", \"calories\": number, \"protein\": number, \"carbs\": number, \"fat\": number}",
-            },
-            {
-              inline_data: {
-                mime_type: "image/jpeg",
-                data: photoBase64,
-              },
-            },
-          ],
-        },
-      ],
-    }),
-  }
-);
+    // Water tracking
+    const addWater = (amount) => {
+      const newWater = Math.min(waterMl + amount, waterGoal);
+      setWaterMl(newWater);
+      storage.saveDailyLog(storage.getTodayKey(), { waterMl: newWater, food: MEALS.flatMap(m => foodByMeal[m.key] || []) });
+    };
 
-const data = await response.json();
-const replyText = data.candidates[0].content.parts[0].text;
-console.log("Extracted text:", replyText);
-const parsed = JSON.parse(replyText);
-const newEntry = {
-  id: Date.now(),
-  name: parsed.name,
-  calories: parsed.calories,
-  protein: parsed.protein,
-  carbs: parsed.carbs,
-  fat: parsed.fat,
-  timestamp: Date.now(),
-};
-const updatedFood = [newEntry, ...food];
-setFood(updatedFood);
-await storage.addFoodToToday(newEntry);
+    const scanPlate = async () => {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        alert("Camera permission is needed to scan food.");
+        return;
+      }
 
-} catch (error) {
-console.error("Scan failed:", error);
-alert("Couldn't analyze that photo. Try again.");
-} finally {
-setScanning(false);
-}
-};
+      const result = await ImagePicker.launchCameraAsync({
+        base64: true,
+        quality: 0.5,
+      });
+
+      if (result.canceled) return;
+
+      setScanning(true);
+      try {
+        const photoBase64 = result.assets[0].base64;
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${process.env.EXPO_PUBLIC_EXPLABS_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: "Estimate the calories, protein, carbs, and fat for the food in this image. Respond ONLY with JSON in this exact shape, no other text: {\"name\": \"short food description\", \"calories\": number, \"protein\": number, \"carbs\": number, \"fat\": number}" },
+                  { inline_data: { mime_type: "image/jpeg", data: photoBase64 } },
+                ],
+              }],
+            }),
+          }
+        );
+
+        const data = await response.json();
+        const replyText = data.candidates[0].content.parts[0].text;
+        console.log("Extracted text:", replyText);
+        const parsed = JSON.parse(replyText);
+        
+        // Pre-fill form with AI result
+        setFoodForm({
+          name: parsed.name,
+          calories: parsed.calories,
+          protein: parsed.protein,
+          carbs: parsed.carbs,
+          fat: parsed.fat,
+          meal: activeMeal,
+          serving: "1",
+          servingUnit: "serving",
+        });
+        setShowFoodSearch(false);
+      } catch (error) {
+        console.error("Scan failed:", error);
+        alert("Couldn't analyze that photo. Try again.");
+      } finally {
+        setScanning(false);
+      }
+    };
+
+    // Barcode scanner handler
+    const handleBarcodeScanned = async ({ type, data }) => {
+      if (barcodeScanned) return;
+      setBarcodeScanned(true);
+      setShowBarcodeScanner(false);
+      // In production, lookup barcode in OpenFoodFacts or similar API
+      // For now, show alert with barcode
+      alert(`Barcode scanned: ${data}\n\nIn production, this would lookup the product in a food database.`);
+      setTimeout(() => setBarcodeScanned(false), 1000);
+    };
+
+    // Filter food database by search query
+    const filteredFoods = FOOD_DATABASE.filter(f =>
+      f.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     return (
+  <>
   <View style={{ flex: 1, backgroundColor: "#12161B" }}>
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.homeTitle}>Log food</Text>
-
-      <TextInput
-        style={[styles.input, { marginTop: 14 }]}
-        placeholder="What did you eat?"
-        placeholderTextColor="#8B95A1"
-        value={foodForm.name}
-        onChangeText={(v) => setFoodForm((prev) => ({ ...prev, name: v }))}
-      />
-      <TextInput
-        style={[styles.input, { marginTop: 10 }]}
-        placeholder="Calories (kcal)"
-        placeholderTextColor="#8B95A1"
-        keyboardType="numeric"
-        value={foodForm.calories}
-        onChangeText={(v) => setFoodForm((prev) => ({ ...prev, calories: v }))}
-      />
-      <TextInput
-        style={[styles.input, { marginTop: 10 }]}
-        placeholder="Protein (g)"
-        placeholderTextColor="#8B95A1"
-        keyboardType="numeric"
-        value={foodForm.protein}
-        onChangeText={(v) => setFoodForm((prev) => ({ ...prev, protein: v }))}
-      />
-      <TextInput
-        style={[styles.input, { marginTop: 10 }]}
-        placeholder="Carbs (g)"
-        placeholderTextColor="#8B95A1"
-        keyboardType="numeric"
-        value={foodForm.carbs}
-        onChangeText={(v) => setFoodForm((prev) => ({ ...prev, carbs: v }))}
-      />
-      <TextInput
-        style={[styles.input, { marginTop: 10 }]}
-        placeholder="Fat (g)"
-        placeholderTextColor="#8B95A1"
-        keyboardType="numeric"
-        value={foodForm.fat}
-        onChangeText={(v) => setFoodForm((prev) => ({ ...prev, fat: v }))}
-      />
-      <TouchableOpacity style={[styles.button, { marginTop: 14 }]} onPress={addFood}>
-        <Text style={styles.buttonText}>Add food</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.button, { marginTop: 10, backgroundColor: "#4FB0A5" }]} onPress={scanPlate}>
-        <Text style={styles.buttonText}>📷 Scan plate</Text>
-      </TouchableOpacity>
-
-      {/* Food list - shows stacked entries */}
-      {food.length > 0 && (
-        <View style={styles.foodListContainer}>
-          <Text style={styles.foodListTitle}>Today's Foods</Text>
-          {food.map((item) => (
-            <View key={item.id} style={styles.foodItem}>
-              <View style={styles.foodItemMain}>
-                <Text style={styles.foodItemName}>{item.name}</Text>
-                <Text style={styles.foodItemCalories}>{item.calories} kcal</Text>
-              </View>
-              <View style={styles.foodItemMacros}>
-                <Text style={[styles.macroTag, styles.macroTagProtein]}>P: {item.protein}g</Text>
-                <Text style={[styles.macroTag, styles.macroTagCarbs]}>C: {item.carbs}g</Text>
-                <Text style={[styles.macroTag, styles.macroTagFat]}>F: {item.fat}g</Text>
-              </View>
-            </View>
+      {/* Water Tracker */}
+      <View style={styles.waterCard}>
+        <View style={styles.waterHeader}>
+          <Text style={styles.waterTitle}>💧 Water</Text>
+          <Text style={styles.waterProgress}>{waterMl} / {waterGoal} ml</Text>
+        </View>
+        <View style={styles.waterBarTrack}>
+          <View style={[styles.waterBarFill, { width: `${Math.min((waterMl / waterGoal) * 100, 100)}%` }]} />
+        </View>
+        <View style={styles.waterQuickAdd}>
+          {[250, 500, 750].map(amt => (
+            <TouchableOpacity key={amt} style={styles.waterQuickBtn} onPress={() => addWater(amt)}>
+              <Text style={styles.waterQuickBtnText}>+{amt}ml</Text>
+            </TouchableOpacity>
           ))}
-          <View style={styles.foodSummary}>
-            <Text style={styles.summaryLabel}>Total</Text>
-            <Text style={styles.summaryValue}>
-              {food.reduce((sum, i) => sum + i.calories, 0)} kcal  •
-              P: {food.reduce((sum, i) => sum + i.protein, 0)}g  •
-              C: {food.reduce((sum, i) => sum + i.carbs, 0)}g  •
-              F: {food.reduce((sum, i) => sum + i.fat, 0)}g
+        </View>
+      </View>
+
+      {/* Meal Tabs */}
+      <View style={styles.mealTabs}>
+        {MEALS.map((meal) => (
+          <TouchableOpacity
+            key={meal.key}
+            style={[
+              styles.mealTab,
+              { borderBottomColor: activeMeal === meal.key ? meal.color : "transparent" },
+              { backgroundColor: activeMeal === meal.key ? `${meal.color}20` : "transparent" },
+            ]}
+            onPress={() => { setActiveMeal(meal.key); setFoodForm(prev => ({ ...prev, meal: meal.key })); }}
+          >
+            <Text style={styles.mealTabIcon}>{meal.icon}</Text>
+            <Text style={[
+              styles.mealTabLabel,
+              { color: activeMeal === meal.key ? meal.color : "#8B95A1" }
+            ]}>
+              {meal.label}
             </Text>
+            <Text style={[
+              styles.mealTabCalories,
+              { color: activeMeal === meal.key ? meal.color : "#8B95A1" }
+            ]}>
+              {mealTotals[meal.key].calories} kcal
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Active Meal Section */}
+      <View style={styles.mealSection}>
+        <View style={styles.mealHeader}>
+          <Text style={styles.mealSectionTitle}>{MEALS.find(m => m.key === activeMeal).label}</Text>
+          <Text style={styles.mealSectionSubtitle}>
+            {mealTotals[activeMeal].calories} kcal  •  P: {mealTotals[activeMeal].protein}g  C: {mealTotals[activeMeal].carbs}g  F: {mealTotals[activeMeal].fat}g
+          </Text>
+        </View>
+
+        {/* Quick Actions */}
+        <View style={styles.quickActions}>
+          <TouchableOpacity style={styles.quickActionBtn} onPress={() => setShowFoodSearch(true)}>
+            <Text style={styles.quickActionIcon}>🔍</Text>
+            <Text style={styles.quickActionText}>Search Foods</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickActionBtn} onPress={() => { setShowBarcodeScanner(true); setBarcodeScanned(false); }}>
+            <Text style={styles.quickActionIcon}>📱</Text>
+            <Text style={styles.quickActionText}>Scan Barcode</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickActionBtn} onPress={scanPlate}>
+            <Text style={styles.quickActionIcon}>📷</Text>
+            <Text style={styles.quickActionText}>AI Photo Scan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickActionBtn} onPress={() => setShowFoodSearch(true)}>
+            <Text style={styles.quickActionIcon}>➕</Text>
+            <Text style={styles.quickActionText}>Manual Entry</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Food List for Active Meal */}
+        {(foodByMeal[activeMeal] || []).length > 0 && (
+          <View style={styles.foodListContainer}>
+            {(foodByMeal[activeMeal] || []).map((item) => (
+              <View key={item.id} style={styles.foodItem}>
+                <View style={styles.foodItemMain}>
+                  <View style={styles.foodItemLeft}>
+                    <Text style={styles.foodItemName}>{item.name}</Text>
+                    <Text style={styles.foodItemServing}>{item.serving} {item.servingUnit}</Text>
+                  </View>
+                  <Text style={styles.foodItemCalories}>{item.calories} kcal</Text>
+                </View>
+                <View style={styles.foodItemMacros}>
+                  <Text style={[styles.macroTag, styles.macroTagProtein]}>P: {item.protein}g</Text>
+                  <Text style={[styles.macroTag, styles.macroTagCarbs]}>C: {item.carbs}g</Text>
+                  <Text style={[styles.macroTag, styles.macroTagFat]}>F: {item.fat}g</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Empty state */}
+        {(foodByMeal[activeMeal] || []).length === 0 && (
+          <View style={styles.emptyMeal}>
+            <Text style={styles.emptyMealText}>No foods logged for {MEALS.find(m => m.key === activeMeal).label.toLowerCase()} yet</Text>
+            <Text style={styles.emptyMealHint}>Tap + to add your first item</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Daily Summary */}
+      <View style={styles.dailySummaryCard}>
+        <Text style={styles.dailySummaryTitle}>Daily Totals</Text>
+        <View style={styles.dailySummaryMacros}>
+          <View style={styles.dailySummaryMacro}>
+            <Text style={styles.dailySummaryMacroLabel}>Calories</Text>
+            <Text style={styles.dailySummaryMacroValue}>{dailyTotals.calories} / {result?.calorieGoal || 0} kcal</Text>
+          </View>
+          <View style={styles.dailySummaryMacro}>
+            <Text style={styles.dailySummaryMacroLabel}>Protein</Text>
+            <Text style={styles.dailySummaryMacroValue}>{dailyTotals.protein}g / {result?.proteinGoal || 0}g</Text>
+          </View>
+          <View style={styles.dailySummaryMacro}>
+            <Text style={styles.dailySummaryMacroLabel}>Carbs</Text>
+            <Text style={styles.dailySummaryMacroValue}>{dailyTotals.carbs}g / {result?.carbGoal || 0}g</Text>
+          </View>
+          <View style={styles.dailySummaryMacro}>
+            <Text style={styles.dailySummaryMacroLabel}>Fat</Text>
+            <Text style={styles.dailySummaryMacroValue}>{dailyTotals.fat}g / {result?.fatGoal || 0}g</Text>
+          </View>
+        </View>
+      </View>
+    </ScrollView>
+  </View>
+
+    {/* Food Search Modal */}
+    {showFoodSearch && (
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Add Food</Text>
+            <TouchableOpacity onPress={() => { setShowFoodSearch(false); setSearchQuery(""); }}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Search Bar */}
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search foods..."
+            placeholderTextColor="#8B95A1"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoFocus
+          />
+
+          {/* Tabs: Database / Recent / Favorites */}
+          <View style={styles.searchTabs}>
+            {["database", "recent", "favorites"].map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                style={[styles.searchTab, { backgroundColor: (showFoodSearch === tab || tab === "database") ? "#E8A23D" : "#1B2129" }]}
+                onPress={() => {}}
+              >
+                <Text style={styles.searchTabLabel}>{tab.charAt(0).toUpperCase() + tab.slice(1)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Food Database Results */}
+          <ScrollView style={styles.searchResults} contentContainerStyle={styles.searchResultsContent}>
+            {searchQuery ? (
+              filteredFoods.map((food) => (
+                <TouchableOpacity key={food.name} style={styles.searchResultItem} onPress={() => quickAddFood(food)}>
+                  <View style={styles.searchResultMain}>
+                    <Text style={styles.searchResultName}>{food.name}</Text>
+                    <View style={styles.searchResultMacros}>
+                      <Text style={[styles.macroTag, styles.macroTagProtein, { fontSize: 9 }]}>P: {food.protein}g</Text>
+                      <Text style={[styles.macroTag, styles.macroTagCarbs, { fontSize: 9 }]}>C: {food.carbs}g</Text>
+                      <Text style={[styles.macroTag, styles.macroTagFat, { fontSize: 9 }]}>F: {food.fat}g</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.searchResultCalories}>{food.calories} kcal / {food.serving}</Text>
+                </TouchableOpacity>
+              ))
+            ) : (
+              FOOD_DATABASE.map((food) => (
+                <TouchableOpacity key={food.name} style={styles.searchResultItem} onPress={() => quickAddFood(food)}>
+                  <View style={styles.searchResultMain}>
+                    <Text style={styles.searchResultName}>{food.name}</Text>
+                    <View style={styles.searchResultMacros}>
+                      <Text style={[styles.macroTag, styles.macroTagProtein, { fontSize: 9 }]}>P: {food.protein}g</Text>
+                      <Text style={[styles.macroTag, styles.macroTagCarbs, { fontSize: 9 }]}>C: {food.carbs}g</Text>
+                      <Text style={[styles.macroTag, styles.macroTagFat, { fontSize: 9 }]}>F: {food.fat}g</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.searchResultCalories}>{food.calories} kcal / {food.serving}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+            
+            {/* Recent Foods */}
+            {recentFoods.length > 0 && (
+              <View style={styles.searchSection}>
+                <Text style={styles.searchSectionTitle}>Recent Foods</Text>
+                {recentFoods.map((food) => (
+                  <TouchableOpacity key={food.id} style={styles.searchResultItem} onPress={() => quickAddFood(food)}>
+                    <View style={styles.searchResultMain}>
+                      <Text style={styles.searchResultName}>{food.name}</Text>
+                      <View style={styles.searchResultMacros}>
+                        <Text style={[styles.macroTag, styles.macroTagProtein, { fontSize: 9 }]}>P: {food.protein}g</Text>
+                        <Text style={[styles.macroTag, styles.macroTagCarbs, { fontSize: 9 }]}>C: {food.carbs}g</Text>
+                        <Text style={[styles.macroTag, styles.macroTagFat, { fontSize: 9 }]}>F: {food.fat}g</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.searchResultCalories}>{food.calories} kcal</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Favorite Foods */}
+            {favoriteFoods.length > 0 && (
+              <View style={styles.searchSection}>
+                <Text style={styles.searchSectionTitle}>Favorites ⭐</Text>
+                {favoriteFoods.map((food) => (
+                  <TouchableOpacity key={food.id} style={styles.searchResultItem} onPress={() => quickAddFood(food)}>
+                    <View style={styles.searchResultMain}>
+                      <Text style={styles.searchResultName}>⭐ {food.name}</Text>
+                      <View style={styles.searchResultMacros}>
+                        <Text style={[styles.macroTag, styles.macroTagProtein, { fontSize: 9 }]}>P: {food.protein}g</Text>
+                        <Text style={[styles.macroTag, styles.macroTagCarbs, { fontSize: 9 }]}>C: {food.carbs}g</Text>
+                        <Text style={[styles.macroTag, styles.macroTagFat, { fontSize: 9 }]}>F: {food.fat}g</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.searchResultCalories}>{food.calories} kcal</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Manual Entry Form */}
+          <View style={styles.manualEntryForm}>
+            <Text style={styles.formSectionTitle}>Manual Entry</Text>
+            <TextInput
+              style={[styles.input, { marginTop: 10 }]}
+              placeholder="Food name"
+              placeholderTextColor="#8B95A1"
+              value={foodForm.name}
+              onChangeText={(v) => setFoodForm(prev => ({ ...prev, name: v }))}
+            />
+            <View style={styles.formRow}>
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="Calories"
+                placeholderTextColor="#8B95A1"
+                keyboardType="numeric"
+                value={foodForm.calories}
+                onChangeText={(v) => setFoodForm(prev => ({ ...prev, calories: v }))}
+              />
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="Protein (g)"
+                placeholderTextColor="#8B95A1"
+                keyboardType="numeric"
+                value={foodForm.protein}
+                onChangeText={(v) => setFoodForm(prev => ({ ...prev, protein: v }))}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="Carbs (g)"
+                placeholderTextColor="#8B95A1"
+                keyboardType="numeric"
+                value={foodForm.carbs}
+                onChangeText={(v) => setFoodForm(prev => ({ ...prev, carbs: v }))}
+              />
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="Fat (g)"
+                placeholderTextColor="#8B95A1"
+                keyboardType="numeric"
+                value={foodForm.fat}
+                onChangeText={(v) => setFoodForm(prev => ({ ...prev, fat: v }))}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="Serving (e.g. 1.5)"
+                placeholderTextColor="#8B95A1"
+                keyboardType="numeric"
+                value={foodForm.serving}
+                onChangeText={(v) => setFoodForm(prev => ({ ...prev, serving: v }))}
+              />
+              <TextInput
+                style={[styles.input, styles.halfInput]}
+                placeholder="Unit (e.g. cup, piece)"
+                placeholderTextColor="#8B95A1"
+                value={foodForm.servingUnit}
+                onChangeText={(v) => setFoodForm(prev => ({ ...prev, servingUnit: v }))}
+              />
+            </View>
+            <TouchableOpacity style={[styles.button, { marginTop: 14 }]} onPress={addFood}>
+              <Text style={styles.buttonText}>Add to {MEALS.find(m => m.key === activeMeal).label}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    )}
+
+      {showBarcodeScanner && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.barcodeModal}>
+            <BarCodeScanner
+              onBarCodeScanned={handleBarcodeScanned}
+              style={styles.barcodeScanner}
+            />
+            <View style={styles.barcodeOverlay}>
+              <Text style={styles.barcodeInstruction}>Position barcode within frame</Text>
+              <TouchableOpacity style={styles.barcodeCloseBtn} onPress={() => { setShowBarcodeScanner(false); setBarcodeScanned(false); }}>
+                <Text style={styles.barcodeCloseText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       )}
-    </ScrollView>
     <TabBar active={screen} onChange={setScreen} />
-  </View>
+  </>
 );
   }
 
@@ -1475,5 +1897,365 @@ const styles = StyleSheet.create({
     color: "#181008",
     fontWeight: "700",
     fontSize: 15,
+  },
+  // Food v2 styles
+  waterCard: {
+    backgroundColor: "#1B2129",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  waterHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  waterTitle: {
+    color: "#F2F4F6",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  waterProgress: {
+    color: "#8B95A1",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  waterBarTrack: {
+    height: 8,
+    backgroundColor: "#2A323C",
+    borderRadius: 4,
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  waterBarFill: {
+    height: "100%",
+    backgroundColor: "#4FB0A5",
+    borderRadius: 4,
+  },
+  waterQuickAdd: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  waterQuickBtn: {
+    flex: 1,
+    backgroundColor: "#12161B",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  waterQuickBtnText: {
+    color: "#4FB0A5",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  mealTabs: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: "#2A323C",
+    marginBottom: 16,
+  },
+  mealTab: {
+    flex: 1,
+    flexDirection: "column",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 3,
+    borderBottomColor: "transparent",
+  },
+  mealTabIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  mealTabLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  mealTabCalories: {
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  mealSection: {
+    marginBottom: 20,
+  },
+  mealHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  mealSectionTitle: {
+    color: "#F2F4F6",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  mealSectionSubtitle: {
+    color: "#8B95A1",
+    fontSize: 12,
+  },
+  quickActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 16,
+  },
+  quickActionBtn: {
+    flex: 1,
+    minWidth: "45%",
+    backgroundColor: "#1B2129",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 12,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  quickActionIcon: {
+    fontSize: 18,
+  },
+  quickActionText: {
+    color: "#F2F4F6",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  foodItemLeft: {
+    flex: 1,
+  },
+  foodItemServing: {
+    color: "#8B95A1",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  emptyMeal: {
+    alignItems: "center",
+    paddingVertical: 32,
+    paddingHorizontal: 20,
+  },
+  emptyMealText: {
+    color: "#8B95A1",
+    fontSize: 15,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  emptyMealHint: {
+    color: "#57606A",
+    fontSize: 13,
+    textAlign: "center",
+  },
+  dailySummaryCard: {
+    backgroundColor: "#1B2129",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+  },
+  dailySummaryTitle: {
+    color: "#F2F4F6",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  dailySummaryMacros: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    justifyContent: "space-around",
+  },
+  dailySummaryMacro: {
+    flex: 1,
+    minWidth: "40%",
+    backgroundColor: "#12161B",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 12,
+    padding: 14,
+    alignItems: "center",
+  },
+  dailySummaryMacroLabel: {
+    color: "#8B95A1",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  dailySummaryMacroValue: {
+    color: "#E8A23D",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  // Modal styles
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.8)",
+    justifyContent: "flex-end",
+    zIndex: 100,
+  },
+  modalContent: {
+    backgroundColor: "#1B2129",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 30,
+    maxHeight: "85%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#2A323C",
+  },
+  modalTitle: {
+    color: "#F2F4F6",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  modalClose: {
+    color: "#8B95A1",
+    fontSize: 24,
+    fontWeight: "600",
+  },
+  searchInput: {
+    backgroundColor: "#12161B",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    color: "#F2F4F6",
+    fontSize: 15,
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  searchTabs: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  searchTab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  searchTabLabel: {
+    color: "#F2F4F6",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  searchResults: {
+    maxHeight: 400,
+  },
+  searchResultsContent: {
+    paddingBottom: 20,
+  },
+  searchSection: {
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  searchSectionTitle: {
+    color: "#8B95A1",
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  searchResultItem: {
+    backgroundColor: "#12161B",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  searchResultMain: {
+    flex: 1,
+  },
+  searchResultName: {
+    color: "#F2F4F6",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
+  searchResultMacros: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  searchResultCalories: {
+    color: "#E8A23D",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  manualEntryForm: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#2A323C",
+  },
+  formSectionTitle: {
+    color: "#F2F4F6",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  formRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  halfInput: {
+    flex: 1,
+  },
+  // Barcode scanner modal
+  barcodeModal: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  barcodeScanner: {
+    flex: 1,
+  },
+  barcodeOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "space-between",
+    padding: 40,
+  },
+  barcodeInstruction: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  barcodeCloseBtn: {
+    backgroundColor: "#E2665A",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  barcodeCloseText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
   },
 });

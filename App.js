@@ -383,6 +383,35 @@ setScanning(false);
       <TouchableOpacity style={[styles.button, { marginTop: 10, backgroundColor: "#4FB0A5" }]} onPress={scanPlate}>
         <Text style={styles.buttonText}>📷 Scan plate</Text>
       </TouchableOpacity>
+
+      {/* Food list - shows stacked entries */}
+      {food.length > 0 && (
+        <View style={styles.foodListContainer}>
+          <Text style={styles.foodListTitle}>Today's Foods</Text>
+          {food.map((item) => (
+            <View key={item.id} style={styles.foodItem}>
+              <View style={styles.foodItemMain}>
+                <Text style={styles.foodItemName}>{item.name}</Text>
+                <Text style={styles.foodItemCalories}>{item.calories} kcal</Text>
+              </View>
+              <View style={styles.foodItemMacros}>
+                <Text style={[styles.macroTag, styles.macroTagProtein]}>P: {item.protein}g</Text>
+                <Text style={[styles.macroTag, styles.macroTagCarbs]}>C: {item.carbs}g</Text>
+                <Text style={[styles.macroTag, styles.macroTagFat]}>F: {item.fat}g</Text>
+              </View>
+            </View>
+          ))}
+          <View style={styles.foodSummary}>
+            <Text style={styles.summaryLabel}>Total</Text>
+            <Text style={styles.summaryValue}>
+              {food.reduce((sum, i) => sum + i.calories, 0)} kcal  •
+              P: {food.reduce((sum, i) => sum + i.protein, 0)}g  •
+              C: {food.reduce((sum, i) => sum + i.carbs, 0)}g  •
+              F: {food.reduce((sum, i) => sum + i.fat, 0)}g
+            </Text>
+          </View>
+        </View>
+      )}
     </ScrollView>
     <TabBar active={screen} onChange={setScreen} />
   </View>
@@ -593,6 +622,85 @@ const styles = StyleSheet.create({
   loadingText: {
     color: "#8B95A1",
     fontSize: 16,
+    fontWeight: "600",
+  },
+  foodListContainer: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#2A323C",
+  },
+  foodListTitle: {
+    color: "#F2F4F6",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 12,
+  },
+  foodItem: {
+    backgroundColor: "#1B2129",
+    borderWidth: 1,
+    borderColor: "#2A323C",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  foodItemMain: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  foodItemName: {
+    color: "#F2F4F6",
+    fontSize: 15,
+    fontWeight: "600",
+    flex: 1,
+  },
+  foodItemCalories: {
+    color: "#E8A23D",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  foodItemMacros: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  macroTag: {
+    fontSize: 11,
+    fontWeight: "600",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  macroTagProtein: {
+    backgroundColor: "rgba(79, 176, 165, 0.2)",
+    color: "#4FB0A5",
+  },
+  macroTagCarbs: {
+    backgroundColor: "rgba(232, 162, 61, 0.2)",
+    color: "#E8A23D",
+  },
+  macroTagFat: {
+    backgroundColor: "rgba(226, 102, 90, 0.2)",
+    color: "#E2665A",
+  },
+  foodSummary: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#2A323C",
+  },
+  summaryLabel: {
+    color: "#8B95A1",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  summaryValue: {
+    color: "#F2F4F6",
+    fontSize: 13,
     fontWeight: "600",
   },
 });
